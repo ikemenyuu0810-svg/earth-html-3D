@@ -41,39 +41,84 @@
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.z = 2.5;
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: true,
+                alpha: false
+            });
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
             document.body.appendChild(renderer.domElement);
 
             const ambientLight = new THREE.AmbientLight(0x404040, 0.3);
             scene.add(ambientLight);
 
-            // テクスチャの読み込み
-            const textureLoader = new THREE.TextureLoader();
-            textureLoader.load(
-                'earth.svg',
-                function(texture) {
-                    // テクスチャ読み込み成功
-                    document.getElementById('loading').style.display = 'none';
-                    createGlobe(texture);
-                    setupEventListeners();
-                    animate();
-                },
-                function(xhr) {
-                    // 読み込み進行中
-                    const percentComplete = xhr.loaded / xhr.total * 100;
-                    document.getElementById('loading').textContent = `読み込み中: ${Math.round(percentComplete)}%`;
-                },
-                function(error) {
-                    // エラー処理
-                    console.error('テクスチャの読み込みに失敗しました:', error);
+            // SVGを高解像度で読み込む
+            loadHighResSVGTexture('earth.svg');
+        }
+
+        function loadHighResSVGTexture(url) {
+            // SVGを読み込む
+            fetch(url)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('earth.svgが見つかりません');
+                    }
+                    return response.text();
+                })
+                .then(svgText => {
+                    // SVGをImageオブジェクトとして読み込む
+                    const img = new Image();
+                    const svg = new Blob([svgText], { type: 'image/svg+xml' });
+                    const url = URL.createObjectURL(svg);
+                    
+                    img.onload = function() {
+                        // 高解像度でCanvasにラスタライズ（4096x2048ピクセル）
+                        const canvas = document.createElement('canvas');
+                        const targetWidth = 4096;  // 高解像度
+                        const targetHeight = 2048;
+                        canvas.width = targetWidth;
+                        canvas.height = targetHeight;
+                        
+                        const ctx = canvas.getContext('2d');
+                        // 高品質な描画設定
+                        ctx.imageSmoothingEnabled = true;
+                        ctx.imageSmoothingQuality = 'high';
+                        
+                        // SVGを描画
+                        ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+                        
+                        URL.revokeObjectURL(url);
+                        
+                        // Canvasからテクスチャを作成
+                        const texture = new THREE.CanvasTexture(canvas);
+                        
+                        // テクスチャの品質設定
+                        texture.minFilter = THREE.LinearFilter;
+                        texture.magFilter = THREE.LinearFilter;
+                        texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+                        texture.needsUpdate = true;
+                        
+                        document.getElementById('loading').style.display = 'none';
+                        createGlobe(texture);
+                        setupEventListeners();
+                        animate();
+                    };
+                    
+                    img.onerror = function() {
+                        document.getElementById('loading').textContent = 'テクスチャの読み込みに失敗しました';
+                    };
+                    
+                    img.src = url;
+                })
+                .catch(error => {
+                    console.error('エラー:', error);
                     document.getElementById('loading').textContent = 'earth.svgが見つかりません。同じフォルダに配置してください。';
-                }
-            );
+                });
         }
 
         function createGlobe(texture) {
-            const geometry = new THREE.SphereGeometry(1, 128, 128);
+            // より高解像度の球体ジオメトリ
+            const geometry = new THREE.SphereGeometry(1, 256, 256);
 
             const material = new THREE.ShaderMaterial({
                 uniforms: {
@@ -102,7 +147,7 @@
                     varying vec2 vUv;
                     
                     void main() {
-                        // テクスチャから色を取得
+                        // テクスチャから色を高品質で取得
                         vec4 texColor = texture2D(earthTexture, vUv);
                         
                         // グレースケール化（陸地と海の判定用）
@@ -254,6 +299,7 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
         }
 
         function animate() {
